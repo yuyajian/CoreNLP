@@ -506,6 +506,53 @@ public class CoreMapExpressionExtractor<T extends MatchedExpression>  {
     return matchedExpressions;
   }
 
+  public List<T> extractExpressionsPriority(CoreMap annotation) {
+    // Extract potential expressions
+    List<T> matchedExpressions = new ArrayList<>();
+    List<Integer> stageIds = new ArrayList<>(stages.keySet());
+    Collections.sort(stageIds);
+    for (int stageId : stageIds) {
+      Stage<T> stage = stages.get(stageId);
+      SequenceMatchRules.ExtractRule<CoreMap, T> basicExtractRule = stage.basicExtractRule;
+      if (stage.clearMatched) {
+        matchedExpressions.clear();
+      }
+      if (basicExtractRule != null) {
+        basicExtractRule.extract(annotation, matchedExpressions);
+        if (verbose && matchedExpressions != null) {
+          log.info("extractExpressions() extracting with " + basicExtractRule + " from " + annotation + " gives " + matchedExpressions);
+        }
+
+        //add by yyj 匹配优先级
+        if(matchedExpressions.size()>1){
+          T rule = matchedExpressions.get(0);
+          matchedExpressions.clear();
+          matchedExpressions.add(rule);
+        }
+
+        annotateExpressions(annotation, matchedExpressions);
+        matchedExpressions = MatchedExpression.removeNullValues(matchedExpressions);
+        matchedExpressions = MatchedExpression.removeNested(matchedExpressions);
+        matchedExpressions = MatchedExpression.removeOverlapping(matchedExpressions);
+      }
+
+      List<? extends CoreMap> merged = MatchedExpression.replaceMergedUsingTokenOffsets(annotation.get(tokensAnnotationKey), matchedExpressions);
+      SequenceMatchRules.ExtractRule<List<? extends CoreMap>, T> compositeExtractRule = stage.compositeExtractRule;
+      if (compositeExtractRule != null) {
+        Pair<List<? extends CoreMap>, List<T>> p = applyCompositeRule(
+                compositeExtractRule, merged, matchedExpressions, stage.limitIters);
+        merged = p.first();
+        matchedExpressions = p.second();
+      }
+      matchedExpressions = filterInvalidExpressions(stage.filterRule, matchedExpressions);
+    }
+    Collections.sort(matchedExpressions, MatchedExpression.EXPR_TOKEN_OFFSETS_NESTED_FIRST_COMPARATOR);
+    if (!keepTags) {
+      cleanupTags(annotation);
+    }
+    return matchedExpressions;
+  }
+
   private void annotateExpressions(CoreMap annotation, List<T> expressions) {
     // TODO: Logging can be excessive
     List<T> toDiscard = new ArrayList<>();
